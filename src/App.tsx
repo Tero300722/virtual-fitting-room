@@ -749,6 +749,7 @@ function StudioCanvas({
   productsById,
   selectedOverlayId,
   onSelectOverlay,
+  onMoveOverlay,
   zoom,
   beforeAfter,
 }: {
@@ -757,9 +758,41 @@ function StudioCanvas({
   productsById: Record<string, Product>;
   selectedOverlayId: string | null;
   onSelectOverlay: (id: string | null) => void;
+  onMoveOverlay: (id: string, x: number, y: number) => void;
   zoom: number;
   beforeAfter: boolean;
 }) {
+  const dragRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!dragRef.current) return;
+      event.preventDefault();
+      const { id, startX, startY, originX, originY } = dragRef.current;
+      const deltaX = (event.clientX - startX) / (zoom / 100);
+      const deltaY = (event.clientY - startY) / (zoom / 100);
+      onMoveOverlay(id, originX + deltaX, originY + deltaY);
+    };
+
+    const handlePointerUp = () => {
+      dragRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [onMoveOverlay, zoom]);
+
   return (
     <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[#11151d] shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
       <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
@@ -767,6 +800,7 @@ function StudioCanvas({
         <Badge className="rounded-full border border-white/10 bg-black/30 text-white/80 backdrop-blur-xl">Zoom {zoom}%</Badge>
         <Badge className="rounded-full border border-white/10 bg-black/30 text-white/80 backdrop-blur-xl">Layers {overlays.length}</Badge>
       </div>
+
       <div className="relative aspect-[0.75] min-h-[560px] w-full overflow-hidden bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.12),transparent_35%)]">
         {image ? (
           <motion.div
@@ -798,14 +832,17 @@ function StudioCanvas({
             .map((item) => {
               const product = productsById[item.productId];
               if (!product) return null;
+
               const isSelected = selectedOverlayId === item.id;
               const width = product.overlay.width * item.scale * baseScaleBySize(item.size);
               const height = product.overlay.height * item.scale * baseScaleBySize(item.size);
+
               return (
                 <button
                   key={item.id}
+                  type="button"
                   className={cn(
-                    "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-2xl transition",
+                    "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-2xl touch-none transition active:cursor-grabbing",
                     isSelected && "ring-2 ring-white/60"
                   )}
                   style={{
@@ -815,9 +852,24 @@ function StudioCanvas({
                     opacity: item.opacity,
                     zIndex: item.layer,
                   }}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    dragRef.current = {
+                      id: item.id,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      originX: item.x,
+                      originY: item.y,
+                    };
+                    onSelectOverlay(item.id);
+                  }}
                   onClick={() => onSelectOverlay(item.id)}
                 >
-                  <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: product.overlay.svg }} />
+                  <div
+                    className="h-full w-full pointer-events-none select-none"
+                    dangerouslySetInnerHTML={{ __html: product.overlay.svg }}
+                  />
                 </button>
               );
             })}
@@ -1024,6 +1076,19 @@ function App() {
     if (!selectedOverlayId) return;
     setOverlays((prev) => prev.map((item) => (item.id === selectedOverlayId ? updater(item) : item)));
   }
+  function moveOverlayById(id: string, x: number, y: number) {
+  setOverlays((prev) =>
+    prev.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            x,
+            y,
+          }
+        : item
+    )
+  );
+}
 
   function removeSelectedOverlay() {
     if (!selectedOverlayId) return;
@@ -1200,6 +1265,7 @@ function App() {
                       productsById={productsById}
                       selectedOverlayId={selectedOverlayId}
                       onSelectOverlay={setSelectedOverlayId}
+                      onMoveOverlay={moveOverlayById}
                       zoom={zoom}
                       beforeAfter={beforeAfter}
                     />
